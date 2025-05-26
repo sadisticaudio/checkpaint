@@ -1,0 +1,16 @@
+{
+  "folders": [
+	{
+		"path": "."
+	},
+	{
+		"path": "../CODE/einops-cpp"
+	},
+	{
+		"path": "../../../../home/frye/CODE/frye"
+	},
+	{
+		"path": "../CODE/torchs/2.4.1/11.8/libtorch/include"
+	}
+]
+}

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["scikit-build-core", "pybind11>=2.12", "setuptools>=64", "setuptools-scm>=8", "numpy<2"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "checkpaint"
+version = "CHECKPAINT_VERSION"
+requires-python = "~=PYTHON_VERSION"
+dependencies = [
+  "torch~=TORCH_VERSION.0",
+  "transformer_lens",
+]
+
+[tool.scikit-build]
+cmake.build-type = "CFG_TYPE"
+build.verbose = true
+logging.level = "INFO"
+build.targets = ["_core"]
+build.tool-args = ["-j8"]
+
+[tool.scikit-build.cmake.define]
+# checkpaintVer = {env="checkpaintVer", default="CHECKPAINT_VERSION"}
+ptVer = {env="ptVer", default="TORCH_VERSION"}
+cudaVer = {env="cudaVer", default="CUDA_VERSION"}
+pyVer = {env="pyVer", default="PYTHON_VERSION"}
