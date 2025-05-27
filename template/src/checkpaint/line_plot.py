@@ -222,10 +222,13 @@ def draw_data(tensors, gui, *,
                              readout=False if full_mode else True)
   regular_layout = widgets.Layout(width='max-content', height='30px')
   
+  playAxisButtons, guiAxisMenus = [], []
+  hueSliders, selected_layout, top_box = None, None, None
+  
   if full_mode:
     hueSliders = [widgets.FloatSlider(value=0.5, max=1, step=0.01, description="brightness"), widgets.FloatSlider(value=0.5, max=1, step=0.01, description="contrast")]
     selected_layout = widgets.Layout(width='max-content', height='30px', border='2px solid blue')
-    playAxisButtons, guiAxisMenus = [], []
+    
     for d in range(len(shape)):
       playAxisButtons.append(widgets.Button(decription='0', 
                                             font_weight='bold' if d == 0 else 'normal', 
@@ -269,13 +272,13 @@ def draw_data(tensors, gui, *,
     nonlocal state, renderer, camera, camera_data
     state.change_axes(axes)
     # camera_data = gui.setup_camera(state, camera, canvas)
-
-    for d in range(len(shape)):
-      if d in axes: playAxisButtons[d].description = "x" if axes[0] == d else "y" if axes[1] == d else "z"
-      else: playAxisButtons[d].description = str(state.indices[d])
-      playAxisButtons[d].style = widgets.ButtonStyle(button_color='gray') if d in axes else widgets.ButtonStyle()
-      playAxisButtons[d].layout = selected_layout if d == state.play_axis else regular_layout
-      playAxisButtons[d].disabled = True if d in axes else False
+    if full_mode:
+      for d in range(len(shape)):
+        if d in axes: playAxisButtons[d].description = "x" if axes[0] == d else "y" if axes[1] == d else "z"
+        else: playAxisButtons[d].description = str(state.indices[d])
+        playAxisButtons[d].style = widgets.ButtonStyle(button_color='gray') if d in axes else widgets.ButtonStyle()
+        playAxisButtons[d].layout = selected_layout if d == state.play_axis else regular_layout
+        playAxisButtons[d].disabled = True if d in axes else False
 
     set_scene()
     
@@ -289,7 +292,7 @@ def draw_data(tensors, gui, *,
     if state.get_play_dim() != change.new:
       state.set_play_dim(change.new)
       slider.value = change.new
-      playAxisButtons[state.play_axis].description = str(change.new)
+      if full_mode: playAxisButtons[state.play_axis].description = str(change.new)
       animate()
 
   play.observe(handle_play_change, 'value')
@@ -308,11 +311,13 @@ def draw_data(tensors, gui, *,
     animate()
   
   def set_play_axis(axis):
-    playAxisButtons[state.play_axis].font_weight = "normal"
-    playAxisButtons[state.play_axis].layout = regular_layout
+    if full_mode:
+      playAxisButtons[state.play_axis].font_weight = "normal"
+      playAxisButtons[state.play_axis].layout = regular_layout
     state.set_play_axis(axis)
-    playAxisButtons[axis].font_weight = "bold"
-    playAxisButtons[axis].layout = selected_layout
+    if full_mode:
+      playAxisButtons[axis].font_weight = "bold"
+      playAxisButtons[axis].layout = selected_layout
     play.max = slider.max = shape[axis] - 1
     play.value = slider.value = max(0, state.indices[axis])
     play.interval = time_in_seconds*1000/shape[axis]
