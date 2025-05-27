@@ -30,6 +30,25 @@ class ScaledMap:
     self.map = map
     self.sf = scale_factor
   def __call__(self, x, start, end): return self.map(x * self.sf,start,end)
+  
+def convert_to_geometry(x, num, repeat_idx):
+    y = x[...,None]
+    # tprint("y", y.shape)
+    y = y.repeat(tuple(repeat_idx))
+    # tprint("y", y.shape)
+    new_y_shape = y.shape[:-2] + (num * 2,)
+    y = y.reshape(new_y_shape)
+    # tprint("y", y.shape)
+    y = y[...,1:-1]
+    # tprint("y", y.shape)
+    new_y_shape = y.shape[:-1] + (y.shape[-1]//2,2)
+    y = y.reshape(new_y_shape)
+    # tprint("y", y.shape)
+    x = torch.arange(num, dtype=torch.float, device=x.device)[...,None].repeat(1,2).flatten()[1:-1].reshape(-1,2).expand_as(y)
+    x = x[...,None].cpu().numpy()
+    y = y[...,None].cpu().numpy()
+    # print("x", x.shape, "y", y.shape)
+    return np.concatenate((x, y, np.full_like(x, 0.01)), axis=-1)
 
 class GuiStyle():
   name = "gui_name"
@@ -80,34 +99,17 @@ class Lines(GuiStyle):
     if state["gui_type"] == "fourier": x = state.fft1d(x)
     elif state["gui_type"] == "radial": x = torch.angle(torch.fft.fft(x))
     return x.cpu().numpy()
+  
   def split_and_prepare_data(state, all_data):
     all_gui_data = state.get_permuted_data(all_data)
-    if state["gui_type"] == "fourier": all_gui_data = state.fft1d(all_gui_data)
+    all_gui_data_spec = state.fft1d(all_gui_data)
     # else: all_gui_data = all_gui_data.cpu().numpy()
     data_points = all_gui_data.shape[-1]
     repeat_idx = [1] * (all_gui_data.ndim) + [2]
-    # repeat_idx[-1] = 2
-    # [1,12,23,113]
-    # print("all_data", all_data.shape, "all_gui_data", all_gui_data.shape, "repeat_idx", repeat_idx)
-    y = all_gui_data[...,None]
-    # tprint("y", y.shape)
-    y = y.repeat(tuple(repeat_idx))
-    # tprint("y", y.shape)
-    new_y_shape = y.shape[:-2] + (data_points * 2,)
-    y = y.reshape(new_y_shape)
-    # tprint("y", y.shape)
-    y = y[...,1:-1]
-    # tprint("y", y.shape)
-    new_y_shape = y.shape[:-1] + (y.shape[-1]//2,2)
-    y = y.reshape(new_y_shape)
-    # tprint("y", y.shape)
-    x = torch.arange(data_points, dtype=torch.float, device=all_data.device)[...,None].repeat(1,2).flatten()[1:-1].reshape(-1,2).expand_as(y)
-    x = x[...,None].cpu().numpy()
-    y = y[...,None].cpu().numpy()
-    # print("x", x.shape, "y", y.shape)
-    new_gui_data = np.concatenate((x, y, np.full_like(x, 0.01)), axis=-1)
-    # print("new_gui_data", new_gui_data.shape)
-    return new_gui_data
+    prepared = {}
+    prepared["spacetime"] = convert_to_geometry(all_gui_data, data_points, repeat_idx)
+    prepared["fourier"] = convert_to_geometry(all_gui_data, data_points, repeat_idx)
+    return prepared
   def update_renderables(state, gui_data, sphere, *, get_points=None, get_message=None):
     data_points = gui_data.shape[-1]
     x = np.linspace(0, data_points, data_points, endpoint=False, dtype=gui_data.dtype)

@@ -82,7 +82,6 @@ class AxisState:
   
   def get_fast_gui_frame(self, permuted_data):
     idx = [slice(None)] + [x if x >= 0 else slice(None) for x in self.indices]
-    print("fast frame idx", idx)
     return permuted_data[tuple(idx)]
   
   def fft1d(self, x):
@@ -202,12 +201,9 @@ def draw_data(tensors, gui, *,
               start_indices=[0],
               start_gui_type="spacetime",
               full_mode=False):
-  # print("builtin_fonts", get_builtin_fonts())
-  # print("all_fonts", get_all_fonts())
-  # printCudaMemUsage("beginning of draw_data for " + gui.name)
+
   if isinstance(tensors, torch.Tensor): tensors = [tensors]
   for t in tensors:
-    # tprint("tensor in list min", t.min(), "max", t.max())
     while t.ndim <= gui.n_axes:
       t = t.unsqueeze(0)
   state = AxisState(tensors, gui, start_indices, scale_factor)
@@ -217,26 +213,31 @@ def draw_data(tensors, gui, *,
   while len(label_maps) < len(shape): label_maps = [identity_map] + label_maps
   all_data = torch.stack(tensors)
 
-  hueSliders = [widgets.FloatSlider(value=0.5, max=1, step=0.01, description="brightness"), widgets.FloatSlider(value=0.5, max=1, step=0.01, description="contrast")]
-  play, slider = widgets.Play(min=0, max=shape[0]-1, value=0), widgets.IntSlider(min=0, max=shape[0]-1, value=0, step=1, readout=False if full_mode else True)
-  # play_link = widgets.jslink((play, 'value'), (slider, 'value'))
-
-  selected_layout = widgets.Layout(width='max-content', height='30px', border='2px solid blue')
+  play = widgets.Play(min=0, max=shape[0]-1, value=0)
+  slider = widgets.IntSlider(min=0, 
+                             max=shape[0]-1, 
+                             value=0, 
+                             step=1, 
+                             continuous_update=True if full_mode else False, 
+                             readout=False if full_mode else True)
   regular_layout = widgets.Layout(width='max-content', height='30px')
-  playAxisButtons, guiAxisMenus = [], []
-  for d in range(len(shape)):
-    playAxisButtons.append(widgets.Button(decription='0', 
-                                          font_weight='bold' if d == 0 else 'normal', 
-                                          layout=selected_layout if d == 0 else regular_layout, 
-                                          button_color='darkgray' if d == 0 else 'black'))
-  for a in range(gui.n_axes):
-    guiAxisMenus.append(widgets.Dropdown(options=[((str(i) + "(" + str(shape[i]) + ")"), i) for i in range(len(shape))],
-                                         description=str("x" if a == 0 else "y" if a == 1 else "z") + " axis:",
-                                         value=len(shape) - gui.n_axes + a,
-                                         layout=regular_layout))
+  
+  if full_mode:
+    hueSliders = [widgets.FloatSlider(value=0.5, max=1, step=0.01, description="brightness"), widgets.FloatSlider(value=0.5, max=1, step=0.01, description="contrast")]
+    selected_layout = widgets.Layout(width='max-content', height='30px', border='2px solid blue')
+    playAxisButtons, guiAxisMenus = [], []
+    for d in range(len(shape)):
+      playAxisButtons.append(widgets.Button(decription='0', 
+                                            font_weight='bold' if d == 0 else 'normal', 
+                                            layout=selected_layout if d == 0 else regular_layout, 
+                                            button_color='darkgray' if d == 0 else 'black'))
+    for a in range(gui.n_axes):
+      guiAxisMenus.append(widgets.Dropdown(options=[((str(i) + "(" + str(shape[i]) + ")"), i) for i in range(len(shape))],
+                                          description=str("x" if a == 0 else "y" if a == 1 else "z") + " axis:",
+                                          value=len(shape) - gui.n_axes + a,
+                                          layout=regular_layout))
   
   shape_label = widgets.Label(value = "shape: " + str(list(all_data[0].shape)))
-  box_layout = widgets.Layout(display='flex', align_items='center', justify_content='flex-start', align_content='space-around')
   graph_button = widgets.Button(decription='lines', font_weight='normal', layout=regular_layout, button_color='black')
   if full_mode:
     play_box = widgets.HBox([play] + hueSliders)
@@ -245,18 +246,14 @@ def draw_data(tensors, gui, *,
   else: 
     top_box = widgets.HBox([play, slider, shape_label, graph_button])
 
-  # dim_box = widgets.HBox(dim_widgets, layout=box_layout)
-  
   scene = Scene(background=None)
-  grid, camera, renderer, camera_data, all_gui_data = None, None, None, None, None, None
+  grid, camera, renderer, camera_data, all_gui_data = None, None, None, None, None
 
   def set_scene():
     nonlocal grid, camera, renderer
     ranges, lengths = gui.get_gui_ranges(state), gui.get_gui_lengths(state)
     left, right, bottom, top = ranges[0][0], ranges[0][1], state.min, state.max
     center = left + lengths[0]/2, bottom + (state.max - state.min)/2
-    # print("left", left, "right", right, "bottom", bottom, "top", top, "center", center, "scene scale", scene.scale)
-    
     new_ratio = shape[-1] / shape[state.axes[0]]
     scene.scale = (new_ratio, 1.0, 1.0)
     
@@ -285,44 +282,32 @@ def draw_data(tensors, gui, *,
   set_axes(state.axes)
 
   def animate():
-    if full_mode:
-      gui_data = state.get_gui_frame(all_gui_data)
-      gui.update_renderables(state, gui_data, camera_data, get_points=get_points, get_message=get_message)
-    else:
-      gui_data = state.get_fast_gui_frame(all_gui_data)
+      gui_data = state.get_fast_gui_frame(all_gui_data[state["gui_type"]])
       gui.update_renderables_fast(state, gui_data)
   
   def handle_play_change(change):
     if state.get_play_dim() != change.new:
-      # print("current play dim", state.get_play_dim(), "change.new", change.new)
       state.set_play_dim(change.new)
       slider.value = change.new
       playAxisButtons[state.play_axis].description = str(change.new)
-      # if descriptor is not None: label.value = descriptor(state.indices)
       animate()
 
   play.observe(handle_play_change, 'value')
-  slider.observe(lambda change: handle_play_change(change), 'value')
+  slider.observe(handle_play_change, 'value')
     
-  def update_animation():
+  def update_gui_data():
     nonlocal all_gui_data
-    if full_mode:
-      state["brightness"] = hueSliders[0].value
-      state["contrast"] = hueSliders[1].value
-      print("in_transform_data")
-      all_gui_data = gui.transform_data(state, all_data)
+    if full_mode: all_gui_data = gui.transform_data(state, all_data)
     else: all_gui_data = gui.split_and_prepare_data(state, all_data)
     animate()
-    
+      
   def graph_button_clicked(change):
     state["gui_type"] = "fourier" if state["gui_type"] == "spacetime" else "spacetime"
     graph_button.description = state["gui_type"]
     set_scene()
-    if full_mode:
-      update_animation()
+    animate()
   
   def set_play_axis(axis):
-    # play.unobserve(handle_play_change, 'value')
     playAxisButtons[state.play_axis].font_weight = "normal"
     playAxisButtons[state.play_axis].layout = regular_layout
     state.set_play_axis(axis)
@@ -331,10 +316,7 @@ def draw_data(tensors, gui, *,
     play.max = slider.max = shape[axis] - 1
     play.value = slider.value = max(0, state.indices[axis])
     play.interval = time_in_seconds*1000/shape[axis]
-    # play.observe(handle_play_change, 'value')
-    # playAxisButtons[axis].blur()
-    # slider.focus()
-    update_animation()
+    update_gui_data()
     
   set_play_axis(start_play_axis)
       
@@ -358,6 +340,7 @@ def draw_data(tensors, gui, *,
     
     axes[new_gui_axis] = new_axis
     set_axes(axes)
+    update_gui_data()
   
   if full_mode:
     class PlayAxisChanger:
@@ -370,14 +353,12 @@ def draw_data(tensors, gui, *,
     
     class GuiAxisChanger:
       def __init__(self, idx): self.idx = idx
-      def __call__(self, change):
-        set_gui_axis(self.idx, change.new)
-        update_animation()
+      def __call__(self, change): set_gui_axis(self.idx, change.new)
       
     gui_axis_callbacks = [GuiAxisChanger(i) for i in range(len(guiAxisMenus))]
     for i in range(len(guiAxisMenus)):
       guiAxisMenus[i].observe(gui_axis_callbacks[i], names='value')
-    for obj in hueSliders: obj.observe(lambda _ : update_animation(), 'value')
+    for obj in hueSliders: obj.observe(lambda _ : update_gui_data(), 'value')
     
   graph_button.on_click(graph_button_clicked)
   graph_button.description = state["gui_type"]
