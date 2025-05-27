@@ -103,12 +103,11 @@ class Lines(GuiStyle):
   def split_and_prepare_data(state, all_data):
     all_gui_data = state.get_permuted_data(all_data)
     all_gui_data_spec = state.fft1d(all_gui_data)
-    # else: all_gui_data = all_gui_data.cpu().numpy()
     data_points = all_gui_data.shape[-1]
     repeat_idx = [1] * (all_gui_data.ndim) + [2]
     prepared = {}
     prepared["spacetime"] = convert_to_geometry(all_gui_data, data_points, repeat_idx)
-    prepared["fourier"] = convert_to_geometry(all_gui_data, data_points, repeat_idx)
+    prepared["fourier"] = convert_to_geometry(all_gui_data_spec, data_points, repeat_idx)
     return prepared
   def update_renderables(state, gui_data, sphere, *, get_points=None, get_message=None):
     data_points = gui_data.shape[-1]
@@ -127,4 +126,3 @@ class Lines(GuiStyle):
     for v, child in enumerate(rendereables.children):
       child.geometry.positions = gui_data[v]
       child.geometry.needsUpdate = True
-

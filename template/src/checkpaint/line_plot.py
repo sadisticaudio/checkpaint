@@ -300,15 +300,14 @@ def draw_data(tensors, gui, *,
     
   def update_gui_data():
     nonlocal all_gui_data
-    if full_mode: all_gui_data = gui.transform_data(state, all_data)
-    else: all_gui_data = gui.split_and_prepare_data(state, all_data)
+    all_gui_data = gui.split_and_prepare_data(state, all_data)
     animate()
       
   def graph_button_clicked(change):
     state["gui_type"] = "fourier" if state["gui_type"] == "spacetime" else "spacetime"
     graph_button.description = state["gui_type"]
     set_scene()
-    animate()
+    update_gui_data()
   
   def set_play_axis(axis):
     if full_mode:
