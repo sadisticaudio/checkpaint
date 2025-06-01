@@ -13,23 +13,29 @@ def cross_entropy_high_precision(logits, labels):
     correct_log_probs = log_probs.gather(dim=-1, index=labels[:, None])[:, 0]
     return -correct_log_probs.mean()
 
-def get_second_harmonics(freqs):
+def obey_nyquist(x): return p - x if x > 56.5 else -x if x < 0 else x
+
+def get_harmonics(freqs):
     harmonics = torch.zeros_like(freqs) if isinstance(freqs, torch.Tensor) else list(freqs)
     for i, freq in enumerate(freqs): harmonics[i] = p - 2 * freq.item() if 2 * freq.item() > p//2 else 2 * freq
     return harmonics
 
-def get_all_second_harmonics(freqs):
-    harmonics = torch.zeros([len(freqs) * len(freqs)], device=freqs.device) if isinstance(freqs, torch.Tensor) else list(freqs) * len(freqs)
-    for j, jfreq in enumerate(freqs):
-        for i, ifreq in enumerate(freqs):
-            fsum, fdiff = jfreq + ifreq, max(jfreq, ifreq) - min(jfreq, ifreq)
-            harmonics[i] = p - (jfreq.item() + ifreq.item()) if 2 * (jfreq.item() + ifreq.item())  > p//2 else (jfreq.item() + ifreq.item()) 
-    return harmonics
-
-def get_second_subharmonics(freqs):
+def get_subharmonics(freqs):
     harmonics = torch.zeros_like(freqs) if isinstance(freqs, torch.Tensor) else list(freqs)
     for i, freq in enumerate(freqs): harmonics[i] = round(p/2 - freq.item()/2) if freq.item() % 2 == 1 else freq//2
     return harmonics
+
+def get_sum_and_difference_frequencies(freqs, include_dc=False):
+    sum_diffs = []
+    for f1 in freqs:
+        for f2 in freqs:
+            big_key, small_key = max(f1,f2), min(f1,f2)
+            sum, diff = obey_nyquist(big_key + small_key), obey_nyquist(big_key - small_key)
+            if sum != 0 and sum not in sum_diffs: sum_diffs.append(sum)
+            if diff != 0 and diff not in sum_diffs: sum_diffs.append(diff)
+    sum_diffs = sorted(sum_diffs)
+    if 0 in sum_diffs and not include_dc: sum_diffs = sum_diffs[1:]
+    return torch.tensor(sum_diffs, device=freqs.device) if isinstance(freqs, torch.Tensor) else sum_diffs
 
 def inputs_last(x):
     if x.size(0) == p*p:

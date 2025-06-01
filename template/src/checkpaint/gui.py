@@ -31,24 +31,28 @@ class ScaledMap:
     self.sf = scale_factor
   def __call__(self, x, start, end): return self.map(x * self.sf,start,end)
   
-def convert_to_geometry(x, num, repeat_idx):
-    y = x[...,None]
-    # tprint("y", y.shape)
-    y = y.repeat(tuple(repeat_idx))
-    # tprint("y", y.shape)
-    new_y_shape = y.shape[:-2] + (num * 2,)
-    y = y.reshape(new_y_shape)
-    # tprint("y", y.shape)
-    y = y[...,1:-1]
-    # tprint("y", y.shape)
-    new_y_shape = y.shape[:-1] + (y.shape[-1]//2,2)
-    y = y.reshape(new_y_shape)
-    # tprint("y", y.shape)
-    x = torch.arange(num, dtype=torch.float, device=x.device)[...,None].repeat(1,2).flatten()[1:-1].reshape(-1,2).expand_as(y)
-    x = x[...,None].cpu().numpy()
-    y = y[...,None].cpu().numpy()
-    # print("x", x.shape, "y", y.shape)
-    return np.concatenate((x, y, np.full_like(x, 0.01)), axis=-1)
+def convert_to_geometry(y, num, orig_num, repeat_idx):
+  # tprint("y", y.shape, "num (data_points)", num, "repeat_idx", repeat_idx)
+  y = y[...,None]
+  # tprint("y", y.shape)
+  y = y.repeat(tuple(repeat_idx))
+  # tprint("y", y.shape)
+  new_y_shape = y.shape[:-2] + (num * 2,)
+  # tprint("resizing y", y.shape, "to new_y_shape", new_y_shape)
+  y = y.reshape(new_y_shape)
+  # tprint("y", y.shape)
+  y = y[...,1:-1]
+  # tprint("y", y.shape)
+  new_y_shape = y.shape[:-1] + (y.shape[-1]//2,2)
+  y = y.reshape(new_y_shape).contiguous()
+  # tprint("y", y.shape)
+  x = torch.arange(num, dtype=torch.float, device=y.device)[...,None].repeat(1,2).flatten()[1:-1].reshape(-1,2).expand_as(y)
+  x = x[...,None].cpu().numpy()# * (orig_num/num)
+  y = y[...,None].cpu().numpy()
+  # print("x", x.shape, "y", y.shape)
+  # tprint("x[...,:5]", x.reshape(-1,x.shape[-2],x.shape[-1])[:5])
+  # tprint("y[...,:5]", y.reshape(-1,y.shape[-2],y.shape[-1])[:5])
+  return np.concatenate((x, y, np.full_like(x, 0.01)), axis=-1).copy()
 
 class GuiStyle():
   name = "gui_name"
@@ -56,21 +60,11 @@ class GuiStyle():
   n_gui_axes = 2
   orientation = "xy"
 
-  def get_min(tensors):
-    the_min = tensors[0][torch.isfinite(tensors[0])].min()
-    for i in range(1,len(tensors)): the_min = torch.minimum(the_min, tensors[i][torch.isfinite(tensors[i])].min())
-    return the_min.cpu().item()
-
-  def get_max(tensors):
-    the_max = tensors[0][torch.isfinite(tensors[0])].max()
-    for i in range(1,len(tensors)): the_max = torch.maximum(the_max, tensors[i][torch.isfinite(tensors[i])].max())
-    return the_max.cpu().item()
-
   @classmethod
   def get_gui_ranges(cls, state):
     ranges = [[0, state.shape[a]] for a in state.axes]
     # print("ranges", ranges, "axes", state.axes, "shape", state.shape)
-    for i in range(cls.n_gui_axes - cls.n_axes): ranges.append([state.min, state.max])
+    for i in range(cls.n_gui_axes - cls.n_axes): ranges.append([state.get_min(), state.get_max()])
     return ranges
   @classmethod
   def get_gui_lengths(cls, state): return [r[1] - r[0] for r in cls.get_gui_ranges(state)]
@@ -80,11 +74,8 @@ class Lines(GuiStyle):
   n_axes = 1
   n_gui_axes = 2
   @classmethod
-  def setup_camera(cls, state, camera, canvas):
-    ranges, lengths = cls.get_gui_ranges(state), cls.get_gui_lengths(state)
-    return None
-  
-  def create_rendereables(state):
+
+  def create_rendereables(self, state):
     num_tensors, shape, colors = state.num_tensors, state.shape, state.colors
     data_points = shape[state.axes[0]]
     rendereables = Group()
@@ -94,31 +85,21 @@ class Lines(GuiStyle):
       rendereables.add(LineSegments2(LineSegmentsGeometry(positions=positions), LineMaterial(linewidth=3, color=colors[v])))
     return rendereables
   
-  def transform_data(state, all_data):
-    x = state.get_permuted_data(all_data)
-    if state["gui_type"] == "fourier": x = state.fft1d(x)
-    elif state["gui_type"] == "radial": x = torch.angle(torch.fft.fft(x))
-    return x.cpu().numpy()
-  
   def split_and_prepare_data(state, all_data):
-    all_gui_data = state.get_permuted_data(all_data)
-    all_gui_data_spec = state.fft1d(all_gui_data)
-    data_points = all_gui_data.shape[-1]
-    repeat_idx = [1] * (all_gui_data.ndim) + [2]
+    time_data = state.get_permuted_data(all_data)
+    freq_data = state.fft1d(time_data).contiguous().clone()
+    # tprint("all_data", all_data.shape, "time_data", time_data.shape, "freq_data", freq_data.shape)
+    state.min["spacetime"] = time_data.min().item()
+    state.max["spacetime"] = time_data.max().item()
+    state.min["fourier"] = freq_data.min().item()
+    state.max["fourier"] = freq_data.max().item()
+    data_points = time_data.shape[-1]
+    repeat_idx = [1] * (time_data.ndim) + [2]
     prepared = {}
-    prepared["spacetime"] = convert_to_geometry(all_gui_data, data_points, repeat_idx)
-    prepared["fourier"] = convert_to_geometry(all_gui_data_spec, data_points, repeat_idx)
+    prepared["spacetime"] = convert_to_geometry(time_data, data_points, state.shape[-1], repeat_idx)
+    prepared["fourier"] = convert_to_geometry(freq_data, data_points, state.shape[-1], repeat_idx)
+    # tprint("prepared spacetime", prepared["spacetime"].shape, "fourier", prepared["fourier"].shape)
     return prepared
-  def update_renderables(state, gui_data, sphere, *, get_points=None, get_message=None):
-    data_points = gui_data.shape[-1]
-    x = np.linspace(0, data_points, data_points, endpoint=False, dtype=gui_data.dtype)
-    rendereables = state.rendereables
-
-    for v, child in enumerate(rendereables.children):
-      new_x, new_y = np.repeat(x, 2)[1:-1].reshape(-1,2), np.repeat(gui_data[v], 2)[1:-1].reshape(-1,2)
-      new_positions = np.concatenate((new_x[...,None], new_y[...,None], np.full_like(new_x, 0.01)[...,None]), axis=-1)
-      child.geometry.positions = new_positions
-      child.geometry.needsUpdate = True
       
   def update_renderables_fast(state, gui_data):
     rendereables = state.rendereables
