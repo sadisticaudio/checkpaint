@@ -22,7 +22,7 @@ def get_fourier_basis(N):
     basis.append(torch.ones(N))
     for freq in range(1, N//2+1):
         basis.append(torch.sin(torch.arange(N)*2 * torch.pi * freq / N))
-        basis.append(torch.cos(torch.arange(N)*2 * torch.pi * freq / N))
+        if not (N % 2 == 0 and freq == N//2): basis.append(torch.cos(torch.arange(N)*2 * torch.pi * freq / N))
     basis = torch.stack(basis, dim=0)#.to(device)
     basis = basis/basis.norm(dim=-1, keepdim=True)#.to(device)
     return basis
@@ -54,14 +54,20 @@ class AxisState:
   def __setitem__(self, index, value): self.data[index] = value
   def get_min(self): return self.min[self.data["gui_type"]]
   def get_max(self): return self.max[self.data["gui_type"]]
-  def set_play_dim(self, d: int): self.indices[self.play_axis] = d
+  def set_play_dim(self, d: int): 
+    # tprint("set_play_dim setting to", d, "... self.indices", self.indices, "   ... also play_axis is", self.play_axis)
+    self.indices[self.play_axis] = d
+    # tprint("set_play_dim set to", d, "... self.indices", self.indices, "   ... also play_axis is", self.play_axis)
   def get_play_dim(self): return self.indices[self.play_axis]
   def set_play_axis(self, a: int):
+    # tprint("set_play_axis setting self.indices", self.indices, "setting to", a)
     self.play_axis = a
     self.indices[a] = max(0, self.indices[a])
+    # tprint("set_play_axis set self.indices", self.indices, "set to", a)
   def get_gui_dim_sizes(self): return [self.shape[a] for a in self.axes]
     
   def change_axes(self, axes):
+    # tprint("change axes setting self.indices", self.indices)
     for a in range(len(axes)):
       for i in range(len(self.indices)):
         if self.indices[i] == -self.n_axes + a:
@@ -69,6 +75,7 @@ class AxisState:
       self.indices[axes[a]] = -self.n_axes + a
     self.axes = axes
     self.rendereables = self.gui.create_rendereables(self)
+    # tprint("change axes set self.indices", self.indices)
     
   def get_permute_tuple(self):
     pt = [0] + [i+1 for i in range(len(self.shape)) if self.indices[i] >= 0] + [i+1 for i in self.axes]
@@ -76,8 +83,10 @@ class AxisState:
   
   def get_permuted_data(self, original_data):
     pt = self.get_permute_tuple()
-    # tprint("permute tuple", pt)
-    return original_data.detach().clone().permute(pt).contiguous()
+    # tprint("self.shape", self.shape, "original_data", original_data.shape, "permute tuple", pt)
+    ret = original_data.detach().clone().permute(pt).contiguous()
+    # tprint("ret", ret.shape)
+    return ret#original_data.detach().clone().permute(pt).contiguous()
     permuted_data = original_data.detach().clone()
     tprint("beginning original_data", original_data.shape, "self.axes", self.axes, "self.indices", self.indices)
     for a in self.axes:
@@ -88,18 +97,19 @@ class AxisState:
   
   def get_fast_gui_frame(self, permuted_data):
     idx = [slice(None)] + [x if x >= 0 else slice(None) for x in self.indices]
+    # tprint("permuted_data", permuted_data.shape, "self.indices", self.indices, "idx", idx)
     return permuted_data[tuple(idx)]
   
   def fft1d(self, x):
     # tprint("x", x.shape, "self.bases[x.shape[-1]].shape", self.bases[x.shape[-1]].shape, "fft bases", self.bases.keys())
     X = ((x/np.sqrt(x.shape[-1]))/(np.sqrt(2)/2)) @ self.bases[x.shape[-1]].transpose(-2,-1)
-    X[...,0] /= 2
+    X[...,0] /= np.sqrt(2)
     return X
   
 def get_major_minor_ticks(x_min, x_max, *, fourier=False):
   if fourier: 
     x_max /= 2
-  log_len = np.log10(x_max - x_min)
+  log_len = np.log10(1e-18 + x_max - x_min)
   log_mod = log_len % 1
   major_tick = np.power(10.0,round(log_len))/(10 if fourier else 5 if log_mod > 0.2 else 2)
   minor_tick = major_tick / (5)
@@ -111,7 +121,7 @@ def get_major_minor_ticks(x_min, x_max, *, fourier=False):
   # print("min", x_min, "max", x_max, "log_len", log_len, "fourier", fourier, "major_tick", major_tick, "log %", log_len % 1)
   return major_ticks, minor_ticks
 
-def create_custom_grid(x_min, x_max, y_min, y_max, screen_width, screen_height, *, fourier=False):
+def create_custom_grid(gui, x_min, x_max, y_min, y_max, screen_width, screen_height, *, fourier=False):
   data_range_x, data_range_y = x_max - x_min, y_max - y_min
   # tprint("x_min, x_max, y_min, y_max", x_min, x_max, y_min, y_max)
   pixel_size_x, pixel_size_y = data_range_x/screen_width, data_range_y/screen_height
@@ -126,10 +136,11 @@ def create_custom_grid(x_min, x_max, y_min, y_max, screen_width, screen_height, 
   line_y_0 = np.array([[[x_min, 0, 0], [x_max, 0, 0]]], dtype=np.float32)
   
   lines = Group()
-  lines.add(LineSegments2(LineSegmentsGeometry(positions=major_lines_x), LineMaterial(linewidth=2, color='#999')))
-  lines.add(LineSegments2(LineSegmentsGeometry(positions=minor_lines_x), LineMaterial(linewidth=1, color='#555')))
-  lines.add(LineSegments2(LineSegmentsGeometry(positions=major_lines_y), LineMaterial(linewidth=2, color='#999')))
-  lines.add(LineSegments2(LineSegmentsGeometry(positions=minor_lines_y), LineMaterial(linewidth=1, color='#555')))
+  if gui != Heatmap:
+    lines.add(LineSegments2(LineSegmentsGeometry(positions=major_lines_x), LineMaterial(linewidth=2, color='#999')))
+    lines.add(LineSegments2(LineSegmentsGeometry(positions=minor_lines_x), LineMaterial(linewidth=1, color='#555')))
+    lines.add(LineSegments2(LineSegmentsGeometry(positions=major_lines_y), LineMaterial(linewidth=2, color='#999')))
+    lines.add(LineSegments2(LineSegmentsGeometry(positions=minor_lines_y), LineMaterial(linewidth=1, color='#555')))
   lines.add(LineSegments2(LineSegmentsGeometry(positions=line_x_0), LineMaterial(linewidth=3, color='#bbb')))
   lines.add(LineSegments2(LineSegmentsGeometry(positions=line_y_0), LineMaterial(linewidth=3, color='#bbb')))
   def get_label_string(x, regime):
@@ -143,7 +154,7 @@ def create_custom_grid(x_min, x_max, y_min, y_max, screen_width, screen_height, 
   def get_tick_labels(ticks, axis, *, fourier=False):
     tick_low, tick_high = ticks[0], ticks[-1]
     regime = "decimal"
-    if axis == "x" and tick_low % 1 == 0 and tick_high % 1 == 0: regime = "integer"
+    if tick_low % 1 == 0 and tick_high % 1 == 0: regime = "integer"
     # elif tick_low == 0
     else:
       log_low, log_high = np.log10(np.abs(tick_low)) if tick_low != 0 else 0, np.log10(np.abs(tick_high)) if tick_high != 0 else 0
@@ -172,7 +183,7 @@ class WorldGrid:
     self.gui = gui
     self.gui_type = state["gui_type"]
     ranges, lengths = gui.get_gui_ranges(state)[:2], gui.get_gui_lengths(state)
-    self.grid = create_custom_grid(ranges[0][0], ranges[0][1], ranges[1][0], ranges[1][1], width, height, fourier=self.gui_type=="fourier")
+    self.grid = create_custom_grid(gui, ranges[0][0], ranges[0][1], ranges[1][0], ranges[1][1], width, height, fourier=self.gui_type=="fourier")
     dims = self.get_dimensionality()
     self.axis_map = tuple(axis_map[state.axes[i]] if i < min(len(axis_map), len(state.axes)) else identity_map for i in range(dims))
     while len(self.axis_map) < dims: self.axis_map.insert(0, identity_map)
@@ -197,21 +208,25 @@ def draw_data(tensors, gui, *,
               start_play_axis=0,
               start_indices=[0],
               start_gui_type="spacetime",
-              full_mode=False):
+              full_mode=True):
 
   if isinstance(tensors, torch.Tensor): tensors = [tensors]
   for i in range(len(tensors)):
+    tensors[i] = clamp_inf_to_bounds(tensors[i])
     while tensors[i].ndim <= gui.n_axes:
       tensors[i] = tensors[i].unsqueeze(0)
     if i > 0 and tensors[i].shape != tensors[0].shape:
       print("tensors in list passed to draw_data must be all of the same shape, exiting")
       return
+  all_data = torch.stack(tensors)
+  if not torch.any(all_data):
+    print("must have some data that is not zero to plot, sorry...")
+    return
   state = AxisState(tensors, gui, start_indices, scale_factor)
   # state["gui_type"] = start_gui_type
   shape = state.shape
   label_maps = [] if label_maps is None else label_maps if isinstance(label_maps, list) else [label_maps]
   while len(label_maps) < len(shape): label_maps = [identity_map] + label_maps
-  all_data = torch.stack(tensors)
 
   play = widgets.Play(min=0, max=shape[0]-1, value=0)
   slider = widgets.IntSlider(min=0, 
@@ -220,6 +235,7 @@ def draw_data(tensors, gui, *,
                              step=1, 
                              continuous_update=True if full_mode else False, 
                              readout=False)
+  slider.layout.width = "150px"
   if not full_mode: slider.description = str(slider.value) + "/" + str(slider.max)
   regular_layout = widgets.Layout(width='max-content', height='30px')
   
@@ -240,18 +256,20 @@ def draw_data(tensors, gui, *,
                                             options=[((str(i) + "(" + str(shape[i]) + ")"), i) for i in range(len(shape))],
                                             description=str("x" if a == 0 else "y" if a == 1 else "z") + " axis:",
                                             value=len(shape) - gui.n_axes + a,
-                                            layout=regular_layout))
+                                            layout=regular_layout,
+                                            ))
   
   not_full_shape = "[ "
   for i, a in enumerate(all_data[0].shape): not_full_shape += str(a) + " " if i != start_play_axis else "[" + str(a) + "] "
   shape_label = widgets.Label(value = "shape: " + str(list(all_data[0].shape)) if full_mode else not_full_shape + "]")
   graph_button = widgets.Button(decription='lines', font_weight='normal', layout=regular_layout, button_color='black')
-  if full_mode:
-    play_box = widgets.HBox([play] + hueSliders)
-    dim_widgets = widgets.HBox([slider, widgets.HBox(playAxisButtons), shape_label, widgets.HBox(guiAxisMenus), graph_button])
-    top_box = widgets.VBox([play_box, dim_widgets])
-  else: 
-    top_box = widgets.HBox([play, slider, shape_label, graph_button])
+  # if full_mode:
+  #   play_box = widgets.HBox([play] + hueSliders)
+  #   dim_widgets = widgets.HBox([slider, widgets.HBox(playAxisButtons), shape_label, widgets.HBox(guiAxisMenus), graph_button])
+  #   top_box = widgets.VBox([play_box, dim_widgets])
+  # else: 
+  #   top_box = widgets.HBox([play, slider, shape_label, graph_button])
+  top_box = widgets.HBox([play, slider, widgets.HBox(playAxisButtons), shape_label, graph_button])
     
   all_gui_data = gui.split_and_prepare_data(state, all_data)
 
@@ -265,13 +283,15 @@ def draw_data(tensors, gui, *,
     scale = shape[-1] / shape[state.axes[0]], (state.max["spacetime"] - state.min["spacetime"])/lengths[1], 1.0
     # tprint("ranges", ranges, "lengths", lengths, "center", center, "scale", scale)
     scene.position = (0.0,-center[1] * scale[1],0.0)
-    
-    camera = OrthographicCamera(left=-(lengths[0] * 1.1)/2, right=(lengths[0] * 1.1)/2, top=(lengths[1] * 1.1)/2, bottom=-(lengths[1] * 1.2)/2, near=0.1, far=100)
+    w_radius = (lengths[0] * (1.1 if lengths[0] < 100 else 1.2))/2
+    camera = OrthographicCamera(left=-w_radius, right=w_radius, top=(lengths[1] * 1.1)/2, bottom=-(lengths[1] * 1.2)/2, near=0.1, far=100)
     camera.position = [center[0], 0.0, 10]
     camera.lookAt([center[0], 0.0, 0])
-    grid = WorldGrid(state, gui, 800, 300, label_maps)
+    screen_h = 400 if gui == Heatmap else 300
+    screen_w = 800 if gui == Lines else max(screen_h, min(800, round(screen_h * lengths[1]/lengths[0])))
+    grid = WorldGrid(state, gui, screen_w, screen_h, label_maps)
     scene.children = state.rendereables, grid.grid
-    if renderer is None: renderer = Renderer(camera=camera, scene=scene, width=800, height=300, continuous_update = False)
+    if renderer is None: renderer = Renderer(camera=camera, scene=scene, width=screen_w, height=screen_h, continuous_update = False)
     scene.scale = scale
   
   def set_axes(axes):
@@ -292,9 +312,6 @@ def draw_data(tensors, gui, *,
   set_axes(state.axes)
 
   def animate():
-    st, ft = all_gui_data["spacetime"], all_gui_data["fourier"]
-    # tprint("first spacetime", st.)
-    # tprint("all_gui_data spacetime", all_gui_data["spacetime"].shape, "fourier", all_gui_data["fourier"].shape, "mean", all_gui_data["fourier"].mean())
     gui_data = state.get_fast_gui_frame(all_gui_data[state["gui_type"]])
     gui.update_renderables_fast(state, gui_data)
 
@@ -307,8 +324,8 @@ def draw_data(tensors, gui, *,
       if full_mode: playAxisButtons[state.play_axis].description = str(change.new)
       animate()
 
-  play.observe(handle_play_change, 'value')
   slider.observe(handle_play_change, 'value')
+  play.observe(handle_play_change, 'value')
     
   def update_gui_data():
     nonlocal all_gui_data
@@ -322,15 +339,27 @@ def draw_data(tensors, gui, *,
     update_gui_data()
   
   def set_play_axis(axis):
+    # tprint("changing play axis")
     if full_mode:
       playAxisButtons[state.play_axis].font_weight = "normal"
       playAxisButtons[state.play_axis].layout = regular_layout
+    # tprint("about to call state.set_play_axis", "axis", axis, "state.play_axis", state.play_axis, "state.indices", state.indices)
     state.set_play_axis(axis)
+    # tprint("called state.set_play_axis", "axis", axis, "state.play_axis", state.play_axis, "state.indices", state.indices)
+    # time.sleep(1)
     if full_mode:
       playAxisButtons[axis].font_weight = "bold"
       playAxisButtons[axis].layout = selected_layout
-    play.max = slider.max = shape[axis] - 1
-    play.value = slider.value = max(0, state.indices[axis])
+    # tprint("set play.max = slider.max = ", shape[axis] - 1)
+    if slider.max >= state.indices[axis]:
+      play.value = slider.value = max(0, state.indices[axis])
+      play.max = slider.max = shape[axis] - 1
+    else:
+      play.max = slider.max = shape[axis] - 1
+      play.value = slider.value = max(0, state.indices[axis])
+    
+    # tprint("is state.indices[axis] the same as slider max", state.indices[axis], slider.max)
+    # tprint("set play.value = slider.value = ", max(0, state.indices[axis]))
     play.interval = time_in_seconds*1000/shape[axis]
     update_gui_data()
     
@@ -388,3 +417,4 @@ def draw_data(tensors, gui, *,
   display(ui)
 
 def draw_vector(vectors: torch.Tensor, **kwargs): draw_data(vectors, Lines, **kwargs)
+def draw_heatmap(vectors: torch.Tensor, **kwargs): draw_data(vectors, Heatmap, **kwargs)
